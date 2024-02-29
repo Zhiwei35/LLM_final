@@ -54,15 +54,15 @@ void launchRepeatKVCache(TensorWrapper<T> *k_cache_src, //{num_layers, batch_siz
                          TensorWrapper<T> *v_cache_dst)
 {
     int batch_size = context_length->shape[0];
-    int kv_head_num = k_cache_src->shape[2]; // RussWong note: we should carefully access the shape value, corresponding to the place where tensorwapper is defined
+    int kv_head_num = k_cache_src->shape[2]; // (RussWong)note: we should carefully access the shape value, corresponding to the place where tensorwapper is defined
     int max_seq_len = k_cache_src->shape[3];
     int head_num = k_cache_dst->shape[1];
 
     int max_k_len = k_cache_dst->shape[2];
     int head_size = k_cache_dst->shape[3];
     int layer = layer_id->getVal();
-    // note: if layer id is on GPU, here MUSTN'T use layer_id->getVal<int>(), because we cant access GPU memory directly by [] if data is on GPU
-    // note: so we can make layer data locate on CPU, so that we can access data by []
+    // (RussWong)note: if layer id is on GPU, here MUSTN'T use layer_id->getVal<int>(), because we cant access GPU memory directly by [] if data is on GPU
+    // (RussWong)note: so we can make layer data locate on CPU, so that we can access data by []
     size_t layer_offset = layer * batch_size * kv_head_num * max_seq_len * head_size;
     int q_head_per_kv = head_num / kv_head_num;
     int blockSize = 128;

@@ -111,7 +111,7 @@ __global__ void add_fusedQKV_bias_transpose_kernel(T *q_buf,
                                                    T *k_buf,
                                                    T *v_buf,
                                                    T *QKV,
-                                                   const T *qkv_bias,
+                                                   /*optional*/const T *qkv_bias,
                                                    const int *padding_offset, // created before qkv linear
                                                    const int *history_length,
                                                    const int *input_length, // actual length of each seq
@@ -196,7 +196,7 @@ __global__ void add_fusedQKV_bias_transpose_kernel(half *q_buf,
                                                    half *k_buf,
                                                    half *v_buf,
                                                    half *QKV,
-                                                   const half *qkv_bias,
+                                                   /*optional*/const half *qkv_bias,
                                                    const int *padding_offset, // created before qkv linear
                                                    const int *history_length,
                                                    const int *input_length, // actual length of each seq
@@ -309,7 +309,7 @@ void launchAddFusedQKVBiasTransposeAndRoPE(TensorWrapper<T> *q_buf,
                                                            k_buf->data,
                                                            v_buf->data,
                                                            QKV->data,
-                                                           qkv.bias,
+                                                           /*optional*/qkv.bias,
                                                            padding_offset->data,
                                                            history_length->data,
                                                            input_length->data,
@@ -334,7 +334,6 @@ template void launchAddFusedQKVBiasTransposeAndRoPE(TensorWrapper<float> *q_buf,
                                                     TensorWrapper<float> *v_buf,
                                                     TensorWrapper<float> *QKV,
                                                     BaseWeight<float> &qkv,
-                                                    // Tensor* qkv_bias,
                                                     TensorWrapper<int> *padding_offset,
                                                     TensorWrapper<int> *history_length,
                                                     TensorWrapper<int> *input_length,
@@ -344,7 +343,6 @@ template void launchAddFusedQKVBiasTransposeAndRoPE(TensorWrapper<half> *q_buf,
                                                     TensorWrapper<half> *v_buf,
                                                     TensorWrapper<half> *QKV,
                                                     BaseWeight<half> &qkv,
-                                                    // Tensor* qkv_bias,
                                                     TensorWrapper<int> *padding_offset,
                                                     TensorWrapper<int> *history_length,
                                                     TensorWrapper<int> *input_length,
@@ -390,7 +388,7 @@ __global__ void rope_kernel_for_self_decoder(T* q,
     k[k_offset] = k_rotate.x;
     k[k_offset + head_size / 2] = k_rotate.y;
 }
-// // TODO: fp16 self decoder rope has not implemented yet
+// TODO: fp16 self decoder rope has not implemented yet
 template<>
 __global__ void rope_kernel_for_self_decoder(half* q,
                     half* k,

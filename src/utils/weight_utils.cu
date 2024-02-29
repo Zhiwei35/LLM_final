@@ -141,7 +141,7 @@ public:
     }
 };
 
-// ！！(wrong case) report more than one instance
+// ！！(wrong case)C++委员会规定：函数模板不支持模板偏特化
 // template<typename T_OUT, typename T_FILE>
 // typename std::enable_if<std::is_same<T_OUT, T_FILE>::value, int>::type loadWeightFromBin(T_OUT* ptr, std::vector<size_t> shape, std::string filename)
 // {

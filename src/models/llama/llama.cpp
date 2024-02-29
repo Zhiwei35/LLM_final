@@ -1,6 +1,9 @@
 #include "src/models/llama/llama.h"
 
 // (RussWong)note: we only support batch size = 1 now
+// ！！(RussWong)note:
+// 目前暂时只支持输入"Hey, are you conscious? Can you talk to me?"，支持了dynamic input shape后方可支持其它输入
+// C++ tokenizer Encode暂时不能正常运行，正在fix，故以上输入暂时只能手动通过HF tokenizer API获取，见src/tools/HF_llama_run_script.py
 // cpu unpinned buffer
 template <typename T>
 void Llama<T>::allocateCPUBuffer(int batch_size)

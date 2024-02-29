@@ -1,6 +1,7 @@
 #include <math.h>
 #include "src/utils/debug_utils.h"
 #include "src/layers/attention/masked_self_attention.h"
+//(RussWong) note: layers文件夹下，很多操作后面我都加了`DeviceSyncAndCheckCudaError();`，大家可手动删除或者按照lesson30所示添加条件编译代码
 template<typename T>
 LLaMASelfAttentionLayer<T>::LLaMASelfAttentionLayer(
                                int head_num,
@@ -49,14 +50,14 @@ void LLaMASelfAttentionLayer<T>::freeBuf(){
 template<typename T>
 void LLaMASelfAttentionLayer<T>::forward(TensorMap& inputs, TensorMap& outputs, LLaMAattentionWeights<T>& weights, LLaMAAttentionDynParams& params)
 {   
-    // RussWong) note: allocate intermediate buf of the layer forward
+    // (RussWong) note: allocate intermediate buf of the layer forward
     allocForForward(params);
     //1. qkv linear
-    //[bs,1,q_hidden_units] * [q_hidden_units, hidden_units] = [bs,1,hidden_units]
+    //shape:[bs,1,q_hidden_units] * [q_hidden_units, hidden_units] = [bs,1,hidden_units]
     Tensor* attention_input = inputs["attention_input"];
     launchLinearGemm(attention_input->as<T>(), weights.qkv, qkv_buf, cublas_wrapper, false, true);
     DeviceSyncAndCheckCudaError();
-    //2. biasrope
+    //2. biasRope
     Tensor* attention_output = outputs["attention_output"];
     // kv cache shape = [bs, kv head num, max seq len head size]
     Tensor* key_cache       = outputs["all_k_cache"];

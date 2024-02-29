@@ -54,11 +54,11 @@ __global__ void append_value_cache(T *v_dst,
     int tid = threadIdx.x;
     int token_id = blockIdx.x;
 
-    // 指针偏移到当前layer的v cache
+    // (RussWong) notes:指针偏移到v cache在当前layer的起始地址
     T *v_cache_dst = v_dst + layer_offset;
     int cur_seq_len = cur_query_length[batch_id];
     int cumsum_seq_len = history_length[batch_id];
-    // note: the if judge is a must, because the max_q_len is GTE than cur_seq_len.
+    // note: the if judge is a must, because the max_q_len is greater than or equal to cur_seq_len.
     if (token_id < cur_seq_len)
     {
         // [batch, head num, max_q_len, head size] -> [batch, head num, maxseqlen[cumsum_seq_len:cumsum_seq_len+cur_seq_len], head size]

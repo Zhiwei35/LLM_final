@@ -1,6 +1,7 @@
 #include <iostream>
 #include "src/layers/ffn/ffn.h"
 #include "src/utils/debug_utils.h"
+//(RussWong) note: layers文件夹下，很多操作后面我都加了`DeviceSyncAndCheckCudaError();`，大家可手动删除或者按照lesson30所示添加条件编译代码
 template<typename T>
 LLaMAFFNLayer<T>::LLaMAFFNLayer(int head_num,
                                int head_size,
@@ -58,7 +59,7 @@ void LLaMAFFNLayer<T>::forward(TensorMap& inputs, TensorMap& outputs, LLaMAFFNWe
     // 1.fusedGateUp proj
     launchLinearGemm(ffn_input->as<T>(), weights.gateAndup, SwiGLU_input, cublas_wrapper, false, true);
     DeviceSyncAndCheckCudaError();
-    // // up proj
+    // single up proj linear, deprecated due to fuse gate and up into fusedGateAndup
     // launchLinearGemm(ffn_input->as<T>(), weights.up, SwiGLU_input, cublas_wrapper, false, false, true);
 #ifdef SAVE_DATA  
     save_tensor(SwiGLU_input ,"swiglu_input.bin", count);

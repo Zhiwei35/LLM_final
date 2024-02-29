@@ -50,7 +50,7 @@ __global__ void topK_kernel_round1(const T* probs, const int vocab_size,
     }
 }
 // shape infer: [bs, beamwidth, BlockPerBeam, K] => [bs, beamwidth, K]
-// ids是beamwidth * vocalsize中的全局word id
+// ids是beam width * vocab size中的全局word id
 // gridSize = bs
 // blockSize = 256
 template<typename T, int K, int blockSize, int BlockPerBeam>

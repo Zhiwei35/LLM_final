@@ -2,6 +2,7 @@
 #include "src/utils/macro.h"
 #include "src/utils/debug_utils.h"
 #include "src/layers/attention/context_attention.h"
+//(RussWong) note: layers文件夹下，很多操作后面我都加了`DeviceSyncAndCheckCudaError();`，大家可手动删除或者按照lesson30所示添加条件编译代码
 template<typename T>
 LLaMAContextAttentionLayer<T>::LLaMAContextAttentionLayer(
                                int head_num,
@@ -86,14 +87,13 @@ void LLaMAContextAttentionLayer<T>::forward(TensorMap& inputs, TensorMap& output
     // RussWong) note: allocate intermediat buf of the layer forward
     allocForForward(params);
     //1.qkv linear
-    //[num_tokens, qhiddenunits] * [qhiddenunits, hiddenunits]
+    //shape:[num_tokens, qhiddenunits] * [qhiddenunits, hiddenunits]
     Tensor* attention_input = inputs["attention_input"];
     launchLinearGemm(attention_input->as<T>(), weights.qkv, qkv_buf_wo_pad, cublas_wrapper, false, true);
     DeviceSyncAndCheckCudaError();
     //2.qkv bias and rope and padding
-    //[num_tokens, hiddenunits]=>{batch_size, q(kv)head_num, max_q_len, head_size}
+    //shape:[num_tokens, hiddenunits]=>{batch_size, q(kv)head_num, max_q_len, head_size}
     //(RussWong) note: qkv bias is not existed in llama
-    // Tensor qkv_bias = inputs["qkv_bias"];
     Tensor* padding_offset = inputs["padding_offset"];
     Tensor* history_length = inputs["history_length"];
     Tensor* input_length = inputs["input_length"];
@@ -109,16 +109,15 @@ void LLaMAContextAttentionLayer<T>::forward(TensorMap& inputs, TensorMap& output
 #else
 #endif
     //3.concat past kv cache
-    //max_cache_seq_len = max_seq_len + max_prefix_prompt_length
     // max q len is input length with bs = 1
-    //{batch_size, kv_head_num, max_q_len, headsize}=>(num_layer ,batch , maxseqlen[cumsum_seq_len:cumsum_seq_len+cur_seq_len], hidden_units_}; 
+    //shape:{batch_size, kv_head_num, max_q_len, headsize}=>(num_layer ,batch , maxseqlen[cumsum_seq_len:cumsum_seq_len+cur_seq_len], hidden_units_}; 
     Tensor* all_k_cache = outputs["all_k_cache"];
     Tensor* all_v_cache = outputs["all_v_cache"];
     launchConcatKVCache(k_buf_w_pad, v_buf_w_pad, layer_id->as<int>(), input_length->as<int>(), history_length->as<int>(), all_k_cache->as<T>(), all_v_cache->as<T>());
     DeviceSyncAndCheckCudaError();
     //4.MHA/MQA/GQA part, reduce kv cache size to [num_layer, bs, kv head num, max_seq_len, head size]
-    //0.kv repeat/broadcast to adapt batchgemm shape requirement([bs, head num, seqlen, head size]) if need
-    //[num_layer, bs, kv head num, max_seq_len, head size]=>[bs, q head num, max_k_len, head size]
+    // 0.kv repeat/broadcast to adapt batchgemm shape requirement([bs, head num, seqlen, head size]) if need
+    // shape:[num_layer, bs, kv head num, max_seq_len, head size]=>[bs, q head num, max_k_len, head size]
     Tensor* context_length = inputs["context_length"];
     launchRepeatKVCache(all_k_cache->as<T>(), all_v_cache->as<T>(), context_length->as<int>(), 
                                 layer_id->as<int>(), k_cache_buf, v_cache_buf);
@@ -127,24 +126,27 @@ void LLaMAContextAttentionLayer<T>::forward(TensorMap& inputs, TensorMap& output
     save_tensor(k_cache_buf ,"k_buf_after_repeat.bin", layer_id->as<int>()); //{batch_size, head_num, max_k_len, head_size}
 #else
 #endif
-    //1.qk [bs,qhead,qlen,headsize]*[bs,qhead,klen,headsize](N*T)=>[bs,head,qlen,klen]
+    // 1.qk 
+    // shape:[bs,qhead,qlen,headsize]*[bs,qhead,klen,headsize](N*T)=>[bs,head,qlen,klen]
     launchLinearStridedBatchGemm(q_buf_w_pad, k_cache_buf, qk_buf, cublas_wrapper, false, true);
     DeviceSyncAndCheckCudaError();
-    //2.scale+mask+softmax
+    // 2.scale+mask+softmax
     Tensor* attention_mask = inputs["attention_mask"];
     launchScaleMaskAndSoftmax(qk_buf, attention_mask->as<T>(), qk_buf, scale);
     DeviceSyncAndCheckCudaError();
-    //3.qk*v [bs,head,qlen,klen]=>[bs,head,qlen,headsize]
+    // 3.qk*v 
+    // shape:[bs,head,qlen,klen]=>[bs,head,qlen,headsize]
     launchLinearStridedBatchGemm(qk_buf, v_cache_buf, qkv_buf_w_pad, cublas_wrapper, false, false);
     DeviceSyncAndCheckCudaError();
 #ifdef SAVE_DATA
     save_tensor(qkv_buf_w_pad ,"qk_v_buf_after_bmm.bin", layer_id->as<int>()); // {batch_size, head_num, max_q_len, head_size}
 #else
 #endif
-    //4.transpose+reshape([bs,head,seqlen,headsize]=>[bs,seqlen,head,headsize]=>[numtokens,hiddenunits])+remove padding
+    // 4.transpose+reshape(shape:[bs,head,seqlen,headsize]=>[bs,seqlen,head,headsize]=>[numtokens,hiddenunits])+remove padding
     launchTransposeOutRemovePadding(qkv_buf_w_pad, padding_offset->as<int>(), qkv_buf_wo_pad_1);
     DeviceSyncAndCheckCudaError();
-    // 5.output linear [numtokens,hiddenunits]=>[numtokens,hiddenunits]
+    // 5.output linear 
+    // shape:[numtokens,hiddenunits]=>[numtokens,hiddenunits]
     Tensor* attention_output = outputs["attention_output"];
     launchLinearGemm(qkv_buf_wo_pad_1, weights.output, attention_output->as<T>(), cublas_wrapper, false, true);
 #ifdef SAVE_DATA
@@ -153,7 +155,6 @@ void LLaMAContextAttentionLayer<T>::forward(TensorMap& inputs, TensorMap& output
 #endif
     DeviceSyncAndCheckCudaError();
     this->freeBuf();
-    DeviceSyncAndCheckCudaError();
 }
 
 template class LLaMAContextAttentionLayer<float>;

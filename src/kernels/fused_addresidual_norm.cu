@@ -12,7 +12,7 @@ __device__ T warpReduceSum(T val){
     }
     return val; // 32 threads return val, but only 0th thread is sum val
 }
-//note:!!!when blocksize < 32, use blockDim.x/32 to get warp nums is wrong, we should instead ceil it
+// (RussWong) notes:!!!when blocksize < 32, use blockDim.x/32 to get warp nums is wrong, we should ceil it instead
 template<typename T>
 __device__ T blockReduceSum(T val){
     int tid = threadIdx.x;
@@ -36,7 +36,7 @@ template<typename T>
 __global__ void FusedAddBiasResidualRMSNorm( // residual.shape = [num tokens, hidden_units]
                                     T* residual, 
                                     T* decoder_out, // [num tokens, hidden_units]
-                                    const T* bias,  // [hidden_units]
+                                    /*optional*/const T* bias,  // [hidden_units]
                                     const T* scale, // [hidden_units], RMSNorm weights
                                     float eps, // RMSNorm eps
                                     int num_tokens, 
