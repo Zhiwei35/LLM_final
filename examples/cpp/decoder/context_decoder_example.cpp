@@ -9,34 +9,6 @@
 #include "src/kernels/input_embedding.h"
 #include "src/weights/llama/embedding_weights.h"
 
-// template <typename T>
-// void Llama<T>::InitializeForContextDecoder(IntDict &int_params_first_token)
-// {
-//     h_input_length_buf_[0] = int_params_first_token["cur_input_length"];
-//     h_history_length_buf_[0] = int_params_first_token["history_length"];
-//     h_context_length_buf_[0] = int_params_first_token["context_length"];
-//     CHECK(cudaMemcpy(input_ids->data,                                    //
-//                      h_input_ids_buf_,                                   // get from encode
-//                      RoundUpTo32x(sizeof(int) * h_input_length_buf_[0]), // h_input_length_buf = 0B, cause allocation occurs before line137
-//                      cudaMemcpyHostToDevice));
-
-//     CHECK(cudaMemcpy(input_length->data, h_input_length_buf_, RoundUpTo32x(sizeof(int) * batch_size), cudaMemcpyHostToDevice));
-//     CHECK(cudaMemcpy(history_length->data, h_history_length_buf_, RoundUpTo32x(sizeof(int) * batch_size), cudaMemcpyHostToDevice));
-//     CHECK(cudaMemcpy(context_length->data, h_context_length_buf_, RoundUpTo32x(sizeof(int) * batch_size), cudaMemcpyHostToDevice));
-//     CHECK(cudaMemcpy(is_finished->data, h_finished_buf_, RoundUpTo32x(sizeof(bool) * batch_size), cudaMemcpyHostToDevice));
-// }
-
-//TODO: enhance the gpu memory deallocation so that we dont need to mannually cudaFree
-//bugs summary
-//1.rmsnorm kernel replace fusedrmsnorm, because cant pass nullptr to initialize  float*
-//2.biasandrope, I forgot to define the bias ptr in example
-//3.batchgemm, k is transpose, so the lda ldb m n k must consider the trans_b=true
-//4.ctxattn and ffn, the device free function, must pass right params type
-size_t RoundUpTo32x(size_t size)
-{
-    return ((size + 31) / 32) * 32;
-}
-
 int main(int argc, char** argv)
 {
     cublasHandle_t cublas_handle;
@@ -80,24 +52,19 @@ int main(int argc, char** argv)
     int context_length_ = res.size();
     int history_length_ = 0;
     int cur_input_length = res.size(); // res.size() is the input ids len, which is the real input len, rather not len of input string
-    // IntDict int_params_first_token;
-    // int_params_first_token["context_length"] = context_length_;
-    // int_params_first_token["history_length"] = 0;
-    // int_params_first_token["cur_input_length"] = cur_input_length;
     LLaMAAttentionDynParams attn_dyn_params;
     attn_dyn_params.batch_size = 1;
-    attn_dyn_params.num_tokens = cur_input_length;          // 这个此时还是0
-    attn_dyn_params.max_q_len = attn_dyn_params.num_tokens; // 这个指一个batch中的q的最大长度，因为此时不支持batch，所以就等于cur input len
-    attn_dyn_params.max_k_len = context_length_;             // max_seq_len; //这个指max context len，指当前batch的动态最大上下文长度
-    // step->data = &context_length;                           //
+    attn_dyn_params.num_tokens = cur_input_length;          
+    attn_dyn_params.max_q_len = attn_dyn_params.num_tokens; // 指一个batch中的q的最大长度，因为此时不支持batch，所以就等于cur input len
+    attn_dyn_params.max_k_len = context_length_;            //这个指max context len，指当前batch的动态最大上下文长度
     // retString为当前轮次对话的所有token string
     std::string retString = "";
 
     TensorWrapper<int>* input_ids = new TensorWrapper<int>(GPU, getTensorType<int>(), {cur_input_length});
     input_ids->data = allocator->Malloc(input_ids->data, sizeof(int) * cur_input_length, false);
-    CHECK(cudaMemcpy(input_ids->data,                                    //
-                     h_input_ids_buf_,                                   // get from encode
-                     sizeof(int) * cur_input_length,//RoundUpTo32x(sizeof(int) * cur_input_length), // h_input_length_buf = 0B, cause allocation occurs before line137
+    CHECK(cudaMemcpy(input_ids->data,                                    
+                     h_input_ids_buf_,                                   
+                     sizeof(int) * cur_input_length, 
                      cudaMemcpyHostToDevice));
     TensorWrapper<float>* decoder_input = new TensorWrapper<float>(GPU, getTensorType<float>(), {/*token num*/  attn_dyn_params.num_tokens, q_hidden_units});
     decoder_input->data = allocator->Malloc(decoder_input->data, sizeof(float) * attn_dyn_params.num_tokens * q_hidden_units, false); 
@@ -163,13 +130,11 @@ int main(int argc, char** argv)
     cudaMalloc((void**)&d_ctx_len, sizeof(int) * attn_dyn_params.batch_size);
     for(int i = 0; i < attn_dyn_params.batch_size; i++){
         h_history_len[i] = 0; // for kv cache cumsum seqlen and rope's timestep compute
-        // h_input_len[i] = 8; // corresponding to padding offset
-        // h_ctx_len[i] = h_history_len[i] + h_input_len[i];
         h_input_len[i] = cur_input_length;
         h_ctx_len[i] = context_length_;
     }
     // weight
-    // this weight is belong to llamaweight
+    // this weight is belong to llamaweight class
     float* h_output_norm_weight = (float*)malloc(sizeof(float) * q_hidden_units);
     float* d_output_norm_weight;
     cudaMalloc((void**)&d_output_norm_weight, sizeof(float) * q_hidden_units);
@@ -313,12 +278,4 @@ int main(int argc, char** argv)
     free(h_input_ids_buf_);
     free(embedding);
     cudaFree(d_embedding);
-    // free(h_attn_norm_weight);
-    // free(h_ffn_norm_weight);
-    // free(h_qkv_weights);
-    // free(h_qkv_bias);
-    // free(h_output_weights);
-    // free(h_out_bias);
-    // free(h_ffn_down);
-    // free(h_ffn_down_bias);
 }

@@ -217,8 +217,8 @@ int Llama<T>::continueTokenGen(LLaMAAttentionDynParams &dparams)
         {"layer_id", layer},
         {"output_norm_weight", output_rmsnorm_weight} // located at llamaweights class, rather not llamalayerweigths
     };
-    // (RussWong) note: 最开始是context decoder涉及的k和v输出到kv cache
-    // self decoder之后每一个step都会输出kv到kv cache, 需要保证kv cache是llama class的成员, 这样就可以保证同步更新
+    // (RussWong) note: 最开始是context decoder里面RoPE输出的k和v写到kv cache
+    // (RussWong) note: self decoder之后每一个step都会输出kv到kv cache, 需要保证kv cache是llama class的成员, 这样就可以保证同步更新
     TensorMap decoder_outputs{
         {"decoder_output", decoder_output},
         {"all_k_cache", all_k_cache},

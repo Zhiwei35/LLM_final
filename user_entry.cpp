@@ -21,10 +21,10 @@ int main(int argc, char **argv) {
         if (input == "s") {//停止对话
             break;
         }    
-        //index可以认为生成的第几个token，从0开始
+        // (RussWong)notes: index = 生成的第几个token，从0开始
         std::string retString = llm_model->Response(llm_model->MakeInput(history, round, input), [model_name](int index, const char* content) {
             if (index == 0) {
-                printf("%s:%s", model_name.c_str(), content);
+                printf(":%s", content);
                 fflush(stdout);
             }
             if (index > 0) {
@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
                 printf("\n");
             }
         });
-        //多轮对话保留history，制作成新的上下文context
+        //(RussWong)notes: 多轮对话保留history，和当前轮次input制作成新的上下文context
         history = llm_model->MakeHistory(history, round, input, retString);
         round++;
     }
