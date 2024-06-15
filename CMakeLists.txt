@@ -5,7 +5,6 @@ find_package(CUDA 10.0 REQUIRED)
 
 set(CUDA_PATH ${CUDA_TOOLKIT_ROOT_DIR})
 
-
 list(APPEND CMAKE_MODULE_PATH ${CUDA_PATH}/lib64)
 find_package(CUDA REQUIRED)
 

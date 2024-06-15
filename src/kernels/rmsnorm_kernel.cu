@@ -81,31 +81,26 @@ __global__ void RMSNorm(half* decoder_out, // [num tokens, q_hidden_units]
     using Vec_t = typename Vec<half>::Type;
     int batch_id = blockIdx.x;
     int tid = threadIdx.x;
-    Vec_t* s; 
     Vec_t* dout = reinterpret_cast<Vec_t*>(decoder_out + batch_id * hidden_units);
     Vec_t* rsd;
-    if (decoder_residual != nullptr) {
-        rsd = reinterpret_cast<Vec_t*>(decoder_residual + batch_id * hidden_units);
-    }
+    rsd = reinterpret_cast<Vec_t*>(decoder_residual + batch_id * hidden_units);
     float thread_accm = 0.0f;
     for(int i = tid; i < hidden_units / vec_size; i += blockDim.x) {
-        Vec_t out = dout[i];// note the offset should divide vec size
-        if (decoder_residual != nullptr) {
-            rsd[i] = out;
-        }
-        thread_accm += __half2float(out.x) * __half2float(out.x);
-        thread_accm += __half2float(out.y) * __half2float(out.y);
+        Vec_t vec = dout[i];// note the offset should divide vec size
+        rsd[i] = vec;
+        thread_accm += __half2float(vec.x) * __half2float(vec.x);
+        thread_accm += __half2float(vec.y) * __half2float(vec.y);
     } //x^2
     
     // mean(x^2)
-    float blocksum = blockReduceSum<float>(thread_accm);
+    thread_accm = blockReduceSum<float>(thread_accm);
     __shared__ float inv_fenmu;
     if(tid == 0){
-        inv_fenmu = rsqrtf(float(blocksum / hidden_units) + eps);
+        inv_fenmu = rsqrtf((float)thread_accm / hidden_units + eps);
     }
     __syncthreads();
     // rmsnorm
-    s = reinterpret_cast<Vec_t*>(scale);
+    Vec_t* s = reinterpret_cast<Vec_t*>(scale);
     for(int i = tid; i < hidden_units / vec_size; i += blockDim.x) {
         Vec_t dout_h2 =dout[i];
         dout[i].x = s[i].x * __float2half(__half2float(dout_h2.x) * inv_fenmu);

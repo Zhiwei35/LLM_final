@@ -114,24 +114,30 @@ __global__ void FusedAddBiasResidualRMSNorm( // residual.shape = [num tokens, hi
     int batch_id = blockIdx.x;
     int tid = threadIdx.x;
     Vec_t *rsd, *bia, *s;
-    Vec_t dout, tmp;
+    Vec_t tmp;
+    Vec_t *de_out = reinterpret_cast<Vec_t*>(decoder_out + batch_id * hidden_units);
     float thread_accm = 0.0f;
-    if (residual != nullptr && bias != nullptr){
-        rsd = reinterpret_cast<Vec_t*>(residual + batch_id * hidden_units);//note the offset     should divide vec size
+    rsd = reinterpret_cast<Vec_t*>(residual + batch_id * hidden_units);//note the offset should divide vec size
+    if (bias != nullptr){
         bia = reinterpret_cast<Vec_t*>(const_cast<half*>(bias));
     }
     for(int i = tid; i < hidden_units / vec_size; i += blockDim.x) {
-        dout = reinterpret_cast<Vec_t*>(decoder_out)[batch_id * hidden_units / vec_size + i];// note the offset should divide vec size
-        tmp = __hadd2(__hadd2(dout, rsd[i]), bia[i]);
-        thread_accm += __half2float(tmp.x) * __half2float(tmp.x) + __half2float(tmp.y) * __half2float(tmp.y);
+        if (residual != nullptr) {
+            de_out[i] = __hadd2(de_out[i], rsd[i]);
+            // update residual to be used in add residual kernel at the end of every decoder layer
+            rsd[i] = de_out[i];
+        }
+        if (bias != nullptr) {
+            de_out[i] = __hadd2(de_out[i], bia[i]);
+        }        
+        thread_accm += __half2float(de_out[i].x) * __half2float(de_out[i].x);
+        thread_accm += __half2float(de_out[i].y) * __half2float(de_out[i].y);
     } // addresidual
     // mean(x^2)
     float blocksum = blockReduceSum<float>(thread_accm);
     __shared__ Vec_t inv_fenmu;
     if(tid == 0){
-        //debug info printf("blocksum on GPU is %f\n", blocksum);
-        inv_fenmu = scalar_cast_vec<Vec_t>(__float2half(rsqrt(blocksum / hidden_units + eps)));
-        //debug info printf("inv_fenmu on GPU is %f\n", inv_fenmu);
+        inv_fenmu = scalar_cast_vec<Vec_t>(__float2half(rsqrt((float)blocksum / hidden_units + eps)));
     }
     // rmsnorm
     Vec_t* out = reinterpret_cast<Vec_t*>(decoder_out + batch_id * hidden_units);// note before vec the stride is batch_id * hiddenunits w/o / vecsize

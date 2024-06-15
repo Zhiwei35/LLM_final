@@ -127,7 +127,9 @@ int main(int argc, char *argv[]) {
         CPUfusedresidandRMSNorm(CPUout, cpu_scale, eps, hidden_units, num_tokens);
         bool is_right = CheckResult<half>(CPUout, decoder_out, total_size);
         // debug info, better to retain: 
-        std::cout << "rmsnorm passed" << std::endl;
+        if (is_right) {
+            std::cout << "rmsnorm passed" << std::endl;
+        }
         free(h_decoder_out);
         free(h_scale);
         free(cpu_scale);
