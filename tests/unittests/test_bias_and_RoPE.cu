@@ -242,7 +242,7 @@ bool CheckResult(T *q, T *k, float *hq, float *hk,
 // (RussWong)note:
 // `./biasRope` to test fp32 GPU kernel
 // half GPU kernel test is not implemented now
-int main()
+int main(int argc, char *argv[])
 {
     const int batch_size = 1;
     const int seq_len = 32;
@@ -256,132 +256,10 @@ int main()
     const int rotary_embedding_dim = 128;
     const int rotary_embedding_base = 10000;
     const int max_position_embeddings = 2048;
-
-    float *q = (float *)malloc(sizeof(float) * batch_size * seq_len * head_num * head_size);    // output
-    float *k = (float *)malloc(sizeof(float) * batch_size * seq_len * kv_head_num * head_size); // output
-    float *v = (float *)malloc(sizeof(float) * batch_size * seq_len * kv_head_num * head_size); // output
-    float *QKV = (float *)malloc(sizeof(float) * token_num * (head_num + 2 * kv_head_num) * head_size);
-    float *qkv_bias = (float *)malloc(sizeof(float) * (head_num + 2 * kv_head_num) * head_size);
-    for (int i = 0; i < token_num * (head_num + 2 * kv_head_num) * head_size; i++)
+    if (argv[1])
     {
-        QKV[i] = 32.0f;
+        TEST_ROPE(half);
+    } else {
+        TEST_ROPE(float);
     }
-    for (int i = 0; i < (head_num + 2 * kv_head_num) * head_size; i++)
-    {
-        qkv_bias[i] = 2.0f;
-    }
-    for (int i = 0; i < batch_size; i++)
-    {
-        input_length[i] = 7;
-        history_length[i] = 0;
-    }
-    for (int i = 0; i < batch_size * seq_len; i++)
-    {
-        padding_offset[i] = 0;
-    }
-
-    int *dpadding_offset;
-    int *dhistory_length;
-    int *dinput_length;
-    float *dq;
-    float *dk;
-    float *dv;
-    float *dQKV;
-    float *dqkv_bias;
-    cudaMalloc((void **)&dpadding_offset, sizeof(int) * batch_size * seq_len);
-    cudaMalloc((void **)&dhistory_length, sizeof(int) * batch_size);
-    cudaMalloc((void **)&dinput_length, sizeof(int) * batch_size);
-    cudaMalloc((void **)&dq, sizeof(float) * batch_size * seq_len * head_num * head_size);
-    cudaMalloc((void **)&dk, sizeof(float) * batch_size * seq_len * kv_head_num * head_size);
-    cudaMalloc((void **)&dv, sizeof(float) * batch_size * seq_len * kv_head_num * head_size);
-    cudaMalloc((void **)&dQKV, sizeof(float) * token_num * (head_num + 2 * kv_head_num) * head_size);
-    cudaMalloc((void **)&dqkv_bias, sizeof(float) * (head_num + 2 * kv_head_num) * head_size);
-
-    cudaMemcpy(dinput_length, input_length, sizeof(int) * batch_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(dhistory_length, history_length, sizeof(int) * batch_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(dpadding_offset, padding_offset, sizeof(int) * seq_len * batch_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(dQKV, QKV, sizeof(float) * token_num * (head_num + 2 * kv_head_num) * head_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(dqkv_bias, qkv_bias, sizeof(float) * (head_num + 2 * kv_head_num) * head_size, cudaMemcpyHostToDevice);
-
-    DataType type = getTensorType<float>();
-    TensorWrapper<float> *q_buf = new TensorWrapper<float>(Device::GPU, type, {batch_size, head_num, seq_len, head_size}, dq);
-    TensorWrapper<float> *k_buf = new TensorWrapper<float>(Device::GPU, type, {batch_size, kv_head_num, seq_len, head_size}, dk);
-    TensorWrapper<float> *v_buf = new TensorWrapper<float>(Device::GPU, type, {batch_size, kv_head_num, seq_len, head_size}, dv);
-    TensorWrapper<float> *QKV_buf = new TensorWrapper<float>(Device::GPU, type, {token_num, head_num + 2 * kv_head_num, head_size}, dQKV);
-    //    Tensor qkv_bias_buf(Device::GPU, type, {(head_num + 2 * kv_head_num), head_size}, dqkv_bias);
-    LLaMAattentionWeights<float> attn_weights;
-    attn_weights.qkv.bias = dqkv_bias;
-    DataType type_int = getTensorType<int>();
-    TensorWrapper<int> *input_length_buf = new TensorWrapper<int>(Device::GPU, type_int, {batch_size}, dinput_length);
-    TensorWrapper<int> *history_length_buf = new TensorWrapper<int>(Device::GPU, type_int, {batch_size}, dhistory_length);
-    TensorWrapper<int> *padding_offset_buf = new TensorWrapper<int>(Device::GPU, type_int, {batch_size, seq_len}, dpadding_offset);
-    LLaMAAttentionStaticParams params;
-    params.rotary_embedding_dim = rotary_embedding_dim;
-    params.rotary_embedding_base = rotary_embedding_base;
-    params.max_position_embeddings = max_position_embeddings;
-    params.use_dynamic_ntk = false;
-    // debug info, better to retain:
-    std::cout << "before launch kernel" << std::endl;
-    launchAddFusedQKVBiasTransposeAndRoPE(q_buf,
-                                          k_buf,
-                                          v_buf,
-                                          QKV_buf,
-                                          attn_weights.qkv,
-                                          padding_offset_buf,
-                                          history_length_buf,
-                                          input_length_buf,
-                                          params);
-    // debug info, better to retain:
-    std::cout << "after launch kernel" << std::endl;
-    // debug info, better to retain:
-    std::cout << "cuda memcpy device to host" << std::endl;
-    // Note: remember to memcpy from device to host and define the correct copy size(mul the sizeof(dtype)), or will cause segment fault
-    CHECK(cudaMemcpy(q, dq, sizeof(float) * batch_size * seq_len * head_num * head_size, cudaMemcpyDeviceToHost));
-    CHECK(cudaMemcpy(k, dk, sizeof(float) * batch_size * seq_len * kv_head_num * head_size, cudaMemcpyDeviceToHost));
-
-    std::cout << "after memcpyd2h, dq[0] = " << q[0] << std::endl;
-    std::cout << "before CPU function" << std::endl;
-    float *hq = (float *)malloc(sizeof(float) * batch_size * seq_len * head_num * head_size);    // output
-    float *hk = (float *)malloc(sizeof(float) * batch_size * seq_len * kv_head_num * head_size); // output
-    CPUfunc(hq,
-            hk, // output
-            v,
-            QKV,
-            qkv_bias,
-            padding_offset,
-            history_length,
-            input_length,
-            batch_size,
-            seq_len,
-            token_num,
-            head_num,
-            kv_head_num,
-            head_size,
-            rotary_embedding_dim,
-            rotary_embedding_base);
-    std::cout << "after CPU function" << std::endl;
-    bool is_right = CheckResult(q, k, hq, hk,
-                                batch_size * seq_len * head_num * head_size,
-                                batch_size * seq_len * kv_head_num * head_size);
-    // debug info, better to retain:
-    std::cout << "before free" << std::endl;
-    std::cout << "passed" << std::endl;
-    free(q);
-    free(k);
-    free(v);
-    free(QKV);
-    free(qkv_bias);
-    free(padding_offset);
-    free(history_length);
-    free(input_length);
-    free(hq);
-    free(hk);
-    cudaFree(dq);
-    cudaFree(dk);
-    cudaFree(dv);
-    cudaFree(dQKV);
-    cudaFree(dqkv_bias);
-    cudaFree(dpadding_offset);
-    cudaFree(dhistory_length);
-    cudaFree(dinput_length);
 }

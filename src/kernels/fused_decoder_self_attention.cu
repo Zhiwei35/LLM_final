@@ -291,6 +291,132 @@ __global__ void masked_MHA_kernel(half* q,
                     const int step,
                     int   rotary_embedding_dim,
                     float rotary_embedding_base){// rsqrt(dh)
+    int tid = threadIdx.x;
+    int q_batch_id = blockIdx.x / head_num;
+    int q_head_id = blockIdx.x % head_num;
+    // (RussWong) note: below one line is wrong kv head id access way.
+    //int kv_head_id = bid % kv_head_num;
+    int kv_head_id = q_head_id / (head_num / kv_head_num);
+    int kv_batch_id = q_batch_id;
+    int batch_stride = head_num * head_size;
+    int kv_batch_stride = kv_head_num * head_size;
+    int head_stride = head_size;
+    int q_offset = q_batch_id * batch_stride + q_head_id * head_stride + tid;
+    int k_offset = kv_batch_id * kv_batch_stride + kv_head_id * head_stride + tid;
+
+    int vec_size = Vec<half>::size;
+    int q_offset_vec = q_batch_id * batch_stride + q_head_id * head_stride + tid * vec_size;
+    int k_offset_vec = kv_batch_id * kv_batch_stride + kv_head_id * head_stride + tid * vec_size;
+    int cache_offset = kv_batch_id * kv_head_num * max_seq_len * head_size +
+                        kv_head_id * max_seq_len * head_size + tid * vec_size;
+    int step_stride = head_size;
+    half scale = __float2half(rsqrt(float(head_size)));
+    using Vec_t = typename Vec<half>::Type;
+    Vec_t qvec, kvec, vvec;
+    const half* q_mem = q;
+    const half* k_mem = k;
+    const half* v_mem = v;
+    if (tid * vec_size < head_size) {
+        qvec = *reinterpret_cast<Vec_t*>(const_cast<T*>(&q_mem[q_offset_vec]));
+        // (RussWong) note: will enable below code lines when qkv bias is available
+        // if (qkv_bias != nullptr){
+	    //     Vec_t q_bias = *reinterpret_cast<Vec_t*>(&qkv_bias[q_head_id * head_size + tid * vec_size]);
+        //     for(int i = 0; i < vec_size; i++) {
+        //         reinterpret_cast<float*>(&qvec)[i] += reinterpret_cast<float*>(&q_bias)[i];
+        //     }
+	    // }
+        kvec = *reinterpret_cast<Vec_t*>(const_cast<T*>(&k_mem[k_offset_vec]));        
+        vvec = *reinterpret_cast<Vec_t*>(const_cast<T*>(&v_mem[k_offset_vec]));
+        // (RussWong) note: will enable below code lines when qkv bias is available
+        // if (qkv_bias != nullptr){
+	    //     Vec_t v_bias =*reinterpret_cast<Vec_t*>(&qkv_bias[kv_head_id * head_size + tid * vec_size + head_num * head_size + kv_head_num * head_size]);
+        //     for(int i = 0; i < vec_size; i++) {
+        //         reinterpret_cast<float*>(&vvec)[i] += reinterpret_cast<float*>(&v_bias)[i];
+        //     }
+	    // }
+    }
+    // q k smem for block reduce
+    // (RussWong) note: define dynamic smem type is char type!! not T
+    // mainly to show how to memory plan dynamic smem 
+    extern __shared__ char sqk[];
+    half* sq_scalar = reinterpret_cast<half*>(sqk); // q存在smem的必要性:在第step行把q存进smem，之前的step-1行可以直接从smem load to reg参与计算
+    half* logits = reinterpret_cast<half*>(sq_scalar + head_size); // logits存在smem的必要性:所有线程reduce的结果存到logits，需要smem
+    Vec_t* sq = reinterpret_cast<Vec_t*>(sq_scalar);
+    if (tid * vec_size < head_size) {
+        sq[tid] = qvec;
+    }
+    __syncthreads();
+    // (RussWong) note: convert some constant scalar to vector type for vectorizedly computation
+    half zero = (half)0.0f;
+    Vec_t zero_h2 = scalar_cast_vec<Vec_t, half>(zero);
+    Vec_t scale_h2 = scalar_cast_vec<Vec_t, half>(scale);
+
+    for(int iter = 0; iter < step; iter++) {
+        // (RussWong) note: every iter,  q and k vector's shape = [1, head size]
+        // reuse k cache
+        // TODO: 或许可以在每个step省略掉前step-1的qk dot
+        Vec_t kvec_qk = tid * vec_size < head_size ? *reinterpret_cast<Vec_t*>(&k_cache[iter * step_stride + cache_offset]) : zero_h2;
+        // (RussWong) note: when final step, update k cache and fetch k from input k vec, rather than kv cache
+        if (iter == step - 1 && tid * vec_size < head_size) {
+            // TODO: update k cache with k with bias add when model has qkv bias
+            *reinterpret_cast<Vec_t*>(&k_cache[iter * step_stride + cache_offset]) = kvec;
+            kvec_qk = kvec;
+        }
+        Vec_t qk = zero_h2;
+        qk = (tid * vec_size < head_size) ? __hmul2(__hmul2(sq[tid], kvec_qk), scale_h2) : zero_h2;
+
+        half qk_acc = __hadd(qk.x, qk.y);
+        //block reduce using multi warp reduce
+        //TODO: maybe broadcast the attn score to each thread of the block in blockreducesum
+        half attn_score = blockReduceSum<half>(qk_acc);
+        if(tid == 0) {
+            logits[iter] = attn_score;
+	    }
+        __syncthreads();
+    }
+    //softmax(logits), logits.shape = [bs, num heads, 1, step]
+    float local_logits = tid < step ? (float)logits[tid] : 0;
+    __shared__ float row_max, fenmu;
+    
+    float block_max = blockReduceMax<float>(local_logits);
+    if (tid == 0){
+        row_max = block_max;
+    }
+    __syncthreads();
+    float fenzi = tid < step ? expf(logits[tid] - row_max) : 0;
+    
+    float block_fenmu = blockReduceSum<float>(fenzi);
+    if (tid == 0){
+        fenmu = block_fenmu + 1e-6;
+    }
+    __syncthreads();
+    if(tid < step) {
+        logits[tid] = (float)(fenzi / fenmu);
+    }
+    __syncthreads();
+
+    // logits*V = [bs, num heads, 1, step] * [bs, kv num heads, step, head size]
+    if (tid * vec_size < head_size) {
+        // note: above if condition is < head size ,not step, because step by step, we have to use [1, step/seqlen] from logits * [1, head size] from v
+        // so here we use acc O to acc the one ele logits * one ele v every step iter
+        // same computation logic with CUDA lesson52 and lesson53
+        float2 O = scalar_cast_vec<float2>(0.0f);
+        for(int iter = 0; iter < step; iter++) {
+            Vec_t vvec_qkv = *reinterpret_cast<Vec_t*>(&v_cache[iter * step_stride + cache_offset]);
+            // T value = v_cache[ite * cache_offset + k_offset];
+            // when final step, update k cache
+	        if (iter == step - 1) {
+                // TODO: update k cache with k with bias add
+                *reinterpret_cast<Vec_t*>(&v_cache[iter * step_stride + cache_offset]) = vvec;
+                // kv cache does not cache cur step kv, so fetch from input v vec of cur step
+                vvec_qkv = vvec;
+            }
+            O.x += (logits[iter] * __half2float(vvec_qkv.x));
+            O.y += (logits[iter] * __half2float(vvec_qkv.y));
+        }
+        *reinterpret_cast<Vec_t*>(&mha_output[q_offset_vec]) = __float22half2_rn(O);
+    }
+}
         // (RussWong) note: to sync with newest fp32 mha
 //     int tid = threadIdx.x;
 //     //int bid = blockIdx.x;
@@ -455,7 +581,6 @@ __global__ void masked_MHA_kernel(half* q,
 //         // float* mha_output_fp32 = reinterpret_cast<float*>(mha_output);
 //         *reinterpret_cast<Vec_t*>(&mha_output[q_offset_vec]) = __float22half2_rn(O);
 //     }
-}
 
 template<typename T>
 void launchDecoderMaskedMHA(TensorWrapper<T>* qkv_buf,
