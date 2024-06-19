@@ -180,7 +180,7 @@ bool CheckResult(T *q, T *k, float *hq, float *hk,
     std::cout << "cuda memcpy device to host" << std::endl;                                                                                \
     CHECK(cudaMemcpy(q, dq, sizeof(dtype) * batch_size * seq_len * head_num * head_size, cudaMemcpyDeviceToHost));                         \
     CHECK(cudaMemcpy(k, dk, sizeof(dtype) * batch_size * seq_len * kv_head_num * head_size, cudaMemcpyDeviceToHost));                      \
-    std::cout << "after memcpyd2h, dq[0] = " << q[0] << std::endl;                                                                         \
+    std::cout << "after memcpyd2h, dq[0] = " << (float)q[0] << std::endl;                                                                         \
     std::cout << "before CPU function" << std::endl;                                                                                       \
     float *hq = (float *)malloc(sizeof(float) * batch_size * seq_len * head_num * head_size);                                              \
     float *hk = (float *)malloc(sizeof(float) * batch_size * seq_len * kv_head_num * head_size);                                           \

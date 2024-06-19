@@ -64,9 +64,10 @@ bool CheckResult(float *CPUoutput, T *GPUoutput, int output_size)
 {
     for (int i = 0; i < output_size; i++)
     {
-        if (fabs(CPUoutput[i] - (float)GPUoutput[i]) > 1e-6)
+	float f_GPUoutput = (float)GPUoutput[i];
+        if (fabs(CPUoutput[i] - f_GPUoutput) > 1e-6)
         {
-            printf("the %dth res is wrong, CPUoutput = %f, GPUoutput = %f\n", i, CPUoutput[i], GPUoutput[i]);
+            printf("the %dth res is wrong, CPUoutput = %f, GPUoutput = %f\n", i, CPUoutput[i], f_GPUoutput);
             return false;
         }
     }
@@ -117,9 +118,7 @@ bool CheckResult(float *CPUoutput, T *GPUoutput, int output_size)
                                                                      type_dtype,                         \
                                                                      {num_tokens, hidden_units},         \
                                                                      d_residual);                        \
-    BaseWeight<dtype> norm;                                                                              \
-    LayerNormWeight<dtype> scale;                                                                        \
-    scale.gamma = d_scale;                                                                               \
+    BaseWeight<dtype> norm;                                                                              \                    
     std::cout << "before launch kernel" << std::endl;                                                    \
     launchFusedAddBiasResidualRMSNorm(residual_tensor,                                                   \
                                       decoder_out_tensor,                                                \
@@ -129,7 +128,7 @@ bool CheckResult(float *CPUoutput, T *GPUoutput, int output_size)
     std::cout << "after launch kernel" << std::endl;                                                     \
     std::cout << "cuda memcpy device to host" << std::endl;                                              \
     CHECK(cudaMemcpy(decoder_out, d_decoder_out, sizeof(dtype) * total_size, cudaMemcpyDeviceToHost));   \
-    CPU_residual = (dtype *)malloc(sizeof(dtype) * total_size);                                          \
+    float* CPU_residual = (float *)malloc(sizeof(float) * total_size);                                   \
     for (int i = 0; i < total_size; i++)                                                                 \
     {                                                                                                    \
         CPU_residual[i] = 0.0f;                                                                          \
@@ -168,7 +167,7 @@ bool CheckResult(float *CPUoutput, T *GPUoutput, int output_size)
     cudaFree(d_bias);                                                                                    \
     cudaFree(d_scale);
 
-int main()
+int main(int argc, char *argv[])
 {
     const int num_tokens = 2;
     const int hidden_units = 32;

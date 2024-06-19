@@ -123,18 +123,22 @@ __global__ void add_fusedQKV_bias_transpose_kernel(T *q_buf,
 
     float2 cos_sin = GetRoPEfreq(tid * 2, rotary_embedding_dim, rotary_embedding_base, timestep);
     // (RussWong)note: print cos and sin of each token id, cos and sin are fixed values that related to 0~max position id, not related to what input id is
-    //if(token_id == 2 && head_id == 0 && tid == 0)
-   // {
-    //    printf("tokenid=2, cos_sin res:\n");
-    //    printf("cos: %f, sin:%f\n", cos_sin.x, cos_sin.y);
-    //}
-    //if(token_id == 1 && head_id == 0 && tid == 0)
-    //{
-    //    printf("tokenid=1, cos_sin res:\n");
-    //    printf("cos: %f, sin:%f\n", cos_sin.x, cos_sin.y);
-    //}
+    
     float2 q_rotate = GetRoPEres(QKV[q_id], QKV[q_id + head_size / 2], cos_sin);
     float2 k_rotate = GetRoPEres(QKV[k_id], QKV[k_id + head_size / 2], cos_sin);
+    //if(token_id == 0 && head_id == 0 && tid == 0)
+    //{
+    //    printf("tokenid=0, cos_sin res:\n");
+    //    printf("cos: %f, sin:%f\n", cos_sin.x, cos_sin.y);
+    //    printf("head=0,tid=0, %f and %f do rotary.\n", QKV[q_id], QKV[q_id + head_size / 2]);
+    //	printf("after rotary, %f and %f\n", q_rotate.x, q_rotate.y);
+    //}
+    //if(token_id == 0 && head_id == 1 && tid == 0)
+    //{
+    //    printf("head=1,tid=0, %f and %f do rotary.\n", QKV[q_id], QKV[q_id + head_size / 2]);
+    //	printf("after rotary, %f and %f\n", q_rotate.x, q_rotate.y);
+    //}
+
     // (RussWong)note: write result back into q k v
     q_buf[dst_q_id] = q_rotate.x;
     q_buf[dst_q_id + head_size / 2] = q_rotate.y;
@@ -206,8 +210,22 @@ __global__ void add_fusedQKV_bias_transpose_kernel(half *q_buf,
     } // tid = [0,1,2,...,63]
 
     float2 cos_sin = GetRoPEfreq(tid * 2, rotary_embedding_dim, rotary_embedding_base, timestep);    // // 4.write back to gmem and do transpose
+    
     half2 q_rotate = GetRoPEres(QKV[q_id], QKV[q_id + head_size / 2], cos_sin);
     half2 k_rotate = GetRoPEres(QKV[k_id], QKV[k_id + head_size / 2], cos_sin);
+    //if(token_id == 0 && head_id == 0 && tid == 0)
+    //{
+    //    printf("tokenid=0, cos_sin res:\n");
+    //    printf("cos: %f, sin:%f\n", cos_sin.x, cos_sin.y);
+    //    printf("head=0,tid=0, %f and %f do rotary.\n", (float)QKV[q_id], (float)QKV[q_id + head_size / 2]);
+    //	printf("after rotary, %f and %f\n",(float)q_rotate.x, (float)q_rotate.y);
+    //}
+    //if(token_id == 0 && head_id == 1 && tid == 0)
+    //{
+    //    printf("head=1,tid=0, %f and %f do rotary.\n", (float)QKV[q_id], (float)QKV[q_id + head_size / 2]);
+    //	printf("after rotary, %f and %f\n",(float)q_rotate.x, (float)q_rotate.y);
+    //}
+
     // (RussWong)note: write result back into q k v
     q_buf[dst_q_id] = q_rotate.x;
     q_buf[dst_q_id + head_size / 2] = q_rotate.y;
@@ -358,7 +376,9 @@ __global__ void rope_kernel_for_self_decoder(half* q,
     half k_rotate_reg = k[k_offset + head_size / 2];
     float2 cos_sin = GetRoPEfreq(tid * 2, rotary_embedding_dim, rotary_embedding_base, step - 1);
     half2 q_rotate = GetRoPEres(q[q_offset], q[q_offset + head_size / 2], cos_sin);
-    half2 k_rotate = make_float2(0,0);
+    half2 k_rotate;
+    k_rotate.x = (half)0;
+    k_rotate.y = (half)0;
     k_rotate.x = (half)cos_sin.x * k_reg - (half)cos_sin.y * k_rotate_reg;
     k_rotate.y = (half)cos_sin.x * k_rotate_reg + (half)cos_sin.y * k_reg;
 
